@@ -1,0 +1,165 @@
+---
+Resources:
+
+  DatabaseExportBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: my-database-export
+
+  DataPipelineDefaultRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: DataPipelineDefaultRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - datapipeline.amazonaws.com
+            - elasticmapreduce.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSDataPipelineRole
+  DataPipelineDefaultResourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: DataPipelineDefaultResourceRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ec2.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforDataPipelineRole
+  DataPipelineDefaultResourceRoleInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: DataPipelineDefaultResourceRole
+      Roles:
+        - Ref: DataPipelineDefaultResourceRole
+
+  # Each data pipelines will export a DynamoDB table. Most of the template content is the same except for
+  #   - Pipeline name and description
+  #   - myDDBTableName
+  #   - myOutputS3Loc
+  #   - pipelineLogUri
+  #   - subnetId
+  MyTableS3Export:
+    Type: AWS::DataPipeline::Pipeline
+    Properties:
+      Name: MyTableS3Export
+      Description: 'Export my DynamoDB table to an S3 bucket'
+      Activate: true
+      PipelineObjects:
+      - Id: TableBackupActivity
+        Name: TableBackupActivity
+        Fields:
+        - Key: type
+          StringValue: EmrActivity
+        - Key: output
+          RefValue: S3BackupLocation
+        - Key: input
+          RefValue: DDBSourceTable
+        - Key: maximumRetries
+          StringValue: '2'
+        - Key: step
+          StringValue: 's3://dynamodb-emr-#{myDDBRegion}/emr-ddb-storage-handler/2.1.0/emr-ddb-2.1.0.jar,org.apache.hadoop.dynamodb.tools.DynamoDbExport,#{output.directoryPath},#{input.tableName},#{input.readThroughputPercent}'
+        - Key: runsOn
+          RefValue: EmrClusterForBackup
+        - Key: resizeClusterBeforeRunning
+          StringValue: true
+      - Id: DDBSourceTable
+        Name: DDBSourceTable
+        Fields:
+        - Key: type
+          StringValue: DynamoDBDataNode
+        - Key: tableName
+          StringValue: '#{myDDBTableName}'
+        - Key: readThroughputPercent
+          StringValue: '#{myDDBReadThroughputRatio}'
+      - Id: EmrClusterForBackup
+        Name: EmrClusterForBackup
+        Fields:
+        - Key: type
+          StringValue: EmrCluster
+        - Key: coreInstanceCount
+          StringValue: '1'
+        - Key: coreInstanceType
+          StringValue: m3.xlarge
+        - Key: releaseLabel
+          StringValue: emr-5.13.0
+        - Key: masterInstanceType
+          StringValue: m3.xlarge
+        - Key: region
+          StringValue: '#{myDDBRegion}'
+        # Make subnet private for better security (compared with the default public subnet)
+        - Key: subnetId
+          StringValue: {Ref: DataPipelineEmrPrivateSubnet}
+      - Id: S3BackupLocation
+        Name: S3BackupLocation
+        Fields:
+        - Key: type
+          StringValue: S3DataNode
+        - Key: directoryPath
+          StringValue: '#{myOutputS3Loc}/#{format(@scheduledStartTime, ''YYYY-MM-dd-HH-mm-ss'')}'
+      - Id: Default
+        Name: Default
+        Fields:
+        - Key: type
+          StringValue: Default
+        - Key: failureAndRerunMode
+          StringValue: CASCADE
+        - Key: role
+          StringValue: DataPipelineDefaultRole
+        - Key: resourceRole
+          StringValue: DataPipelineDefaultResourceRole
+        - Key: pipelineLogUri
+          StringValue: 's3://my-database-export/ddbTableExportLog'
+        - Key: scheduleType
+          StringValue: ONDEMAND
+      ParameterObjects:
+      - Id: myOutputS3Loc
+        Attributes:
+        - Key: description
+          StringValue: 'Output S3 folder'
+        - Key: type
+          StringValue: 'AWS::S3::ObjectKey'
+      - Id: myDDBTableName
+        Attributes:
+        - Key: description
+          StringValue: 'Source DynamoDB table name'
+        - Key: type
+          StringValue: string
+      - Id: myDDBReadThroughputRatio
+        Attributes:
+        - Key: description
+          StringValue: 'DynamoDB read throughput ratio'
+        - Key: type
+          StringValue: Double
+        - Key: default
+          StringValue: '0.25'
+        - Key: watermark
+          StringValue: 'Enter value between 0.1-1.0'
+      - Id: myDDBRegion
+        Attributes:
+        - Key: description
+          StringValue: 'Region of the DynamoDB table'
+        - Key: type
+          StringValue: String
+        - Key: default
+          StringValue: us-west-2
+        - Key: watermark
+          StringValue: us-west-2
+      ParameterValues:
+      - Id: myDDBRegion
+        StringValue: us-west-2
+      - Id: myDDBTableName
+        StringValue: MyExampleTable
+      - Id: myDDBReadThroughputRatio
+        StringValue: '0.2'
+      - Id: myOutputS3Loc
+        StringValue: 's3://my-database-export/ddbTableExport'
+
