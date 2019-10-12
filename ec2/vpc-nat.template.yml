@@ -1,0 +1,96 @@
+Resources:
+  MyVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+  MyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+  # Create an elastic IP for NAT
+  MyEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  MyNatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+        Fn::GetAtt: [MyEIP, AllocationId]
+      SubnetId:
+        Ref: MyPublicSubnet
+  MyInternetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: MyVpc
+  MyNatRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: MyVpc
+  MyVpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: MyVpc
+      InternetGatewayId:
+        Ref: MyInternetGateway
+  MyEc2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: EC2 Security Group for instances launched in the VPC
+      VpcId:
+        Ref: MyVpc
+  MyEc2SecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: MyEc2SecurityGroup
+      IpProtocol: -1
+      SourceSecurityGroupId:
+        Ref: MyEc2SecurityGroup
+  # IP calculation tool http://jodies.de/ipcalc can be useful when you assign IP blocks to subnets
+  MyPublicSubnetUsWest2A:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: us-west-2a
+      CidrBlock: 10.0.0.0/24
+      VpcId:
+        Ref: MyVpc
+  MyPrivateSubnetUsWest2A:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: us-west-2a
+      CidrBlock: 10.0.1.0/24
+      VpcId:
+        Ref: MyVpc
+  MyInternetRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: MyInternetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: MyInternetGateway
+  MyNatRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId:
+        Ref: MyNatRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: MyNatGateway
+  MyPublicSubnetRouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: MyInternetRouteTable
+      SubnetId:
+        Ref: MyPublicSubnet
+  MyNatSubnetRouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId:
+        Ref: MyNatRouteTable
+      SubnetId:
+        Ref: MyPrivateSubnetUsWest2A
+
